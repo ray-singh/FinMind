@@ -251,7 +251,7 @@ export async function getFinancialSummary(userId: string, dateFilter?: { start: 
 export async function getSpendingByCategory(userId: string, limit = 10) {
   return db.select({
     category: transactions.category,
-    total: sql<number>`ROUND(ABS(SUM(amount)), 2)`,
+    total: sql<number>`ROUND(ABS(SUM(amount))::numeric, 2)`,
     count: sql<number>`count(*)`,
   })
     .from(transactions)
@@ -270,9 +270,9 @@ export async function getSpendingByCategory(userId: string, limit = 10) {
 export async function getMonthlyTrends(userId: string, months = 12) {
   return db.select({
     month: sql<string>`TO_CHAR(date::date, 'YYYY-MM')`,
-    expenses: sql<number>`ROUND(ABS(SUM(CASE WHEN amount < 0 THEN amount ELSE 0 END)), 2)`,
-    income: sql<number>`ROUND(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 2)`,
-    net: sql<number>`ROUND(SUM(amount), 2)`,
+    expenses: sql<number>`ROUND(ABS(SUM(CASE WHEN amount < 0 THEN amount ELSE 0 END))::numeric, 2)`,
+    income: sql<number>`ROUND(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END)::numeric, 2)`,
+    net: sql<number>`ROUND(SUM(amount)::numeric, 2)`,
   })
     .from(transactions)
     .where(eq(transactions.userId, userId))
@@ -298,28 +298,75 @@ export async function executeRawQuery(userId: string, query: string): Promise<Re
 
   // Security: Inject user_id filter
   let secureQuery = query
-  const fromTransactionsRegex = /FROM\s+transactions\b/gi
-  const hasWhere = /FROM\s+transactions\s+WHERE/gi.test(query)
+  const upperQuery = query.toUpperCase()
+  const hasTransactions = /FROM\s+TRANSACTIONS\b/.test(upperQuery)
   
-  if (fromTransactionsRegex.test(query)) {
-    if (hasWhere) {
-      secureQuery = query.replace(
-        /FROM\s+transactions\s+WHERE/gi,
-        `FROM transactions WHERE user_id = '${userId}' AND`
-      )
-    } else {
-      secureQuery = query.replace(
-        /FROM\s+transactions\b/gi,
-        `FROM transactions WHERE user_id = '${userId}'`
-      )
+  if (hasTransactions) {
+    // Check if query already has a WHERE clause after FROM transactions
+    const fromMatch = upperQuery.match(/FROM\s+TRANSACTIONS\b/)
+    if (fromMatch) {
+      const afterFrom = upperQuery.slice(fromMatch.index! + fromMatch[0].length)
+      const hasWhereAfterFrom = /^\s*(WHERE\b|[A-Z_]+\s+WHERE\b)/i.test(afterFrom.trim()) || 
+                                 afterFrom.trim().startsWith('WHERE')
+      
+      // Find keywords that come before WHERE would be inserted
+      const hasGroupBy = /\bGROUP\s+BY\b/.test(afterFrom)
+      const hasOrderBy = /\bORDER\s+BY\b/.test(afterFrom)
+      const hasLimit = /\bLIMIT\b/.test(afterFrom)
+      const hasWhereClause = /\bWHERE\b/.test(afterFrom)
+      
+      if (hasWhereClause) {
+        // Insert user_id condition right after WHERE
+        secureQuery = query.replace(
+          /\bWHERE\b/i,
+          `WHERE user_id = '${userId}' AND`
+        )
+      } else if (hasGroupBy) {
+        // Insert WHERE before GROUP BY
+        secureQuery = query.replace(
+          /\bGROUP\s+BY\b/i,
+          `WHERE user_id = '${userId}' GROUP BY`
+        )
+      } else if (hasOrderBy) {
+        // Insert WHERE before ORDER BY
+        secureQuery = query.replace(
+          /\bORDER\s+BY\b/i,
+          `WHERE user_id = '${userId}' ORDER BY`
+        )
+      } else if (hasLimit) {
+        // Insert WHERE before LIMIT
+        secureQuery = query.replace(
+          /\bLIMIT\b/i,
+          `WHERE user_id = '${userId}' LIMIT`
+        )
+      } else {
+        // Append WHERE at the end
+        secureQuery = query.trimEnd()
+        if (secureQuery.endsWith(';')) {
+          secureQuery = secureQuery.slice(0, -1)
+        }
+        secureQuery += ` WHERE user_id = '${userId}'`
+      }
     }
   }
 
-  // Execute using raw SQL with Neon's tagged template literal
-  // We use sql.unsafe() by creating a template from the string
-  const { sql: neonSql } = await import('./index')
-  const result = await neonSql.call(null, [secureQuery] as unknown as TemplateStringsArray)
-  return result as Record<string, unknown>[]
+  // Execute using neon - need to use a workaround for dynamic SQL
+  // Neon requires tagged template literals, but we need dynamic queries for the agent
+  const { Pool } = await import('@neondatabase/serverless')
+  const connectionString = process.env.DATABASE_URL
+  if (!connectionString) {
+    throw new Error('DATABASE_URL is not set')
+  }
+  
+  // Use Pool which supports conventional query() method
+  const pool = new Pool({ connectionString })
+  
+  try {
+    const result = await pool.query(secureQuery)
+    return result.rows as Record<string, unknown>[]
+  } finally {
+    // Don't close pool for serverless - it will be reused
+  }
 }
 
 // ============================================================================
@@ -330,8 +377,9 @@ export async function executeRawQuery(userId: string, query: string): Promise<Re
  * Get all table names
  */
 export async function getAllTables(): Promise<{ name: string }[]> {
-  const { sql: neonSql } = await import('./index')
-  const result = await neonSql`
+  const { getSql } = await import('./index')
+  const sqlClient = getSql()
+  const result = await sqlClient`
     SELECT table_name as name 
     FROM information_schema.tables 
     WHERE table_schema = 'public' 
@@ -344,8 +392,9 @@ export async function getAllTables(): Promise<{ name: string }[]> {
  * Get table schema (columns)
  */
 export async function getTableSchema(tableName: string): Promise<{ column_name: string; data_type: string }[]> {
-  const { sql: neonSql } = await import('./index')
-  const result = await neonSql`
+  const { getSql } = await import('./index')
+  const sqlClient = getSql()
+  const result = await sqlClient`
     SELECT column_name, data_type 
     FROM information_schema.columns 
     WHERE table_name = ${tableName}

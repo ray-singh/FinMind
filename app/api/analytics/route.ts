@@ -3,6 +3,10 @@ import { auth } from '@clerk/nextjs/server'
 import { db, transactions } from '@/lib/db'
 import { eq, desc, lt, sql, and } from 'drizzle-orm'
 
+// This API route uses runtime-only features (auth/headers).
+// Force dynamic rendering so Next.js won't attempt static export.
+export const dynamic = 'force-dynamic'
+
 export async function GET(request: NextRequest) {
   try {
     // Check authentication

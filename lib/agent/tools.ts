@@ -32,8 +32,11 @@ import {
 export function createSqlQueryTool(userId: string) {
   return tool(
     async ({ query }: { query: string }): Promise<string> => {
+      console.log('[Tool:sql_query] Executing for user:', userId)
+      console.log('[Tool:sql_query] Query:', query)
       try {
         const results = await executeRawQuery(userId, query);
+        console.log('[Tool:sql_query] Success, rows:', results.length)
 
         return JSON.stringify({
           success: true,
@@ -42,6 +45,7 @@ export function createSqlQueryTool(userId: string) {
           query: query,
         });
       } catch (error) {
+        console.error('[Tool:sql_query] Error:', error)
         return JSON.stringify({
           success: false,
           error: error instanceof Error ? error.message : "Query execution failed",
@@ -124,6 +128,7 @@ export function createGetCategoresTool(userId: string) {
 export function createGetSummaryTool(userId: string) {
   return tool(
     async ({ timeframe }: { timeframe?: string }): Promise<string> => {
+      console.log('[Tool:get_financial_summary] Executing for user:', userId, 'timeframe:', timeframe)
       try {
         // Calculate date range based on timeframe
         let dateFilter: { start: string; end: string } | undefined;
@@ -155,6 +160,7 @@ export function createGetSummaryTool(userId: string) {
         const summary = await getFinancialSummary(userId, dateFilter);
         const topCategories = await getSpendingByCategory(userId, 5);
 
+        console.log('[Tool:get_financial_summary] Success')
         return JSON.stringify({
           success: true,
           timeframe: timeframe || "all_time",
@@ -162,6 +168,7 @@ export function createGetSummaryTool(userId: string) {
           topCategories: topCategories,
         });
       } catch (error) {
+        console.error('[Tool:get_financial_summary] Error:', error)
         return JSON.stringify({
           success: false,
           error: error instanceof Error ? error.message : "Failed to get summary",

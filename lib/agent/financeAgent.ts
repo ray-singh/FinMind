@@ -291,21 +291,35 @@ export async function runFinanceAgent(userQuery: string, userId: string): Promis
   queryResults: unknown[];
   toolsUsed: string[];
 }> {
-  const graph = createFinanceAgentGraph(userId);
+  console.log('[Agent] Starting finance agent for user:', userId)
+  console.log('[Agent] Query:', userQuery)
+  console.log('[Agent] DATABASE_URL set:', !!process.env.DATABASE_URL)
+  console.log('[Agent] OPENAI_API_KEY set:', !!process.env.OPENAI_API_KEY)
   
-  const initialState = {
-    messages: [new HumanMessage(userQuery)],
-  };
-  
-  const result = await graph.invoke(initialState);
-  
-  return {
-    response: result.finalResponse || "I apologize, but I couldn't process your request. Please try again.",
-    chartData: result.chartData,
-    executedSQL: result.executedSQL,
-    queryResults: result.queryResults,
-    toolsUsed: result.toolsUsed,
-  };
+  try {
+    const graph = createFinanceAgentGraph(userId);
+    
+    const initialState = {
+      messages: [new HumanMessage(userQuery)],
+    };
+    
+    const result = await graph.invoke(initialState);
+    
+    console.log('[Agent] Success! Tools used:', result.toolsUsed)
+    console.log('[Agent] Response length:', result.finalResponse?.length || 0)
+    
+    return {
+      response: result.finalResponse || "I apologize, but I couldn't process your request. Please try again.",
+      chartData: result.chartData,
+      executedSQL: result.executedSQL,
+      queryResults: result.queryResults,
+      toolsUsed: result.toolsUsed,
+    };
+  } catch (error) {
+    console.error('[Agent] Error:', error)
+    console.error('[Agent] Error stack:', error instanceof Error ? error.stack : 'No stack')
+    throw error
+  }
 }
 
 // Export types
