@@ -26,6 +26,7 @@
     "llamaindex": "^0.1.1",
     "lucide-react": "^0.303.0",
     "next": "^14.0.4",
+    "dotenv": "^16.4.7",
     "openai": "^4.24.1",
     "papaparse": "^5.4.1",
     "pgvector": "^0.2.1",
