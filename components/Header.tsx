@@ -8,19 +8,19 @@ export default function Header() {
   const { user, isLoaded } = useUser()
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60">
+    <header className="sticky top-0 z-50 w-full border-b border-slate-800 bg-slate-900/95 backdrop-blur supports-[backdrop-filter]:bg-slate-900/80">
       <div className="container mx-auto px-4 py-4">
         <div className="flex items-center justify-between">
           {/* Logo and Brand */}
           <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-            <div className="p-2 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl shadow-lg">
+            <div className="p-2 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl shadow-lg shadow-blue-500/25">
               <TrendingUp className="text-white" size={24} />
             </div>
             <div>
-              <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                Finance Auto-Pilot
+              <h1 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent">
+                FinMind
               </h1>
-              <p className="text-xs text-gray-500">AI-Powered Financial Insights</p>
+              <p className="text-xs text-slate-400">AI-Powered Financial Insights</p>
             </div>
           </Link>
 
@@ -28,19 +28,19 @@ export default function Header() {
           <nav className="hidden md:flex items-center gap-6">
             <Link 
               href="/" 
-              className="text-sm font-medium text-gray-600 hover:text-blue-600 transition-colors"
+              className="text-sm font-medium text-slate-400 hover:text-blue-400 transition-colors"
             >
               Dashboard
             </Link>
             <Link 
               href="/" 
-              className="text-sm font-medium text-gray-600 hover:text-blue-600 transition-colors"
+              className="text-sm font-medium text-slate-400 hover:text-blue-400 transition-colors"
             >
               Transactions
             </Link>
             <Link 
               href="/" 
-              className="text-sm font-medium text-gray-600 hover:text-blue-600 transition-colors"
+              className="text-sm font-medium text-slate-400 hover:text-blue-400 transition-colors"
             >
               Chat
             </Link>
@@ -51,10 +51,10 @@ export default function Header() {
             {isLoaded && user && (
               <>
                 <div className="hidden md:flex flex-col items-end">
-                  <span className="text-sm font-medium text-gray-700">
+                  <span className="text-sm font-medium text-slate-200">
                     {user.firstName || user.username || 'User'}
                   </span>
-                  <span className="text-xs text-gray-500">
+                  <span className="text-xs text-slate-400">
                     {user.primaryEmailAddress?.emailAddress}
                   </span>
                 </div>
@@ -62,7 +62,7 @@ export default function Header() {
                   afterSignOutUrl="/"
                   appearance={{
                     elements: {
-                      avatarBox: "w-10 h-10 ring-2 ring-blue-500 ring-offset-2"
+                      avatarBox: "w-10 h-10 ring-2 ring-blue-500 ring-offset-2 ring-offset-slate-900"
                     }
                   }}
                 />
