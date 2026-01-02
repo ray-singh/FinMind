@@ -11,7 +11,7 @@ An AI Agent-powered financial assistant that allows users to upload bank stateme
 - **User Management**: Built-in user profile management and account settings
 
 ### AI Agent System
-- **LangGraph Multi-Agent Architecture**: Intelligent agent with 6 specialized tools for financial analysis
+- **LangGraph Multi-Agent Architecture**: Intelligent agent with 11 specialized tools for financial analysis
 - **Autonomous Tool Selection**: Agent automatically chooses the right tools for your question
 - **Multi-Step Reasoning**: Plans complex queries, executes multiple tools, and synthesizes results
 - **Tool Transparency**: See exactly which tools the agent used to answer your question

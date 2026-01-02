@@ -22,7 +22,7 @@ export default function Home() {
     {
       icon: <Brain className="text-blue-500" size={24} />,
       title: 'AI-Powered Agent',
-      description: 'LangGraph multi-agent system with 6 specialized financial analysis tools'
+      description: 'LangGraph multi-agent system with 11 specialized financial analysis tools'
     },
     {
       icon: <Sparkles className="text-purple-500" size={24} />,
