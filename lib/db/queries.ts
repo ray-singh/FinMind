@@ -6,7 +6,8 @@
  */
 
 import { eq, and, desc, sql, like, gte, lt, asc } from 'drizzle-orm'
-import { db, transactions, categoryRules, vectorStore, type Transaction, type NewTransaction, type CategoryRule, type NewCategoryRule } from './index'
+import { db, transactions, categoryRules, vectorStore, userSettings, type Transaction, type NewTransaction, type CategoryRule, type NewCategoryRule, type UserSettings } from './index'
+import { encrypt, decrypt, isEncrypted } from '@/lib/encryption'
 
 // ============================================================================
 // TRANSACTION QUERIES
@@ -395,10 +396,57 @@ export async function getTableSchema(tableName: string): Promise<{ column_name: 
   const { getSql } = await import('./index')
   const sqlClient = getSql()
   const result = await sqlClient`
-    SELECT column_name, data_type 
-    FROM information_schema.columns 
+    SELECT column_name, data_type
+    FROM information_schema.columns
     WHERE table_name = ${tableName}
     ORDER BY ordinal_position
   `
   return result as { column_name: string; data_type: string }[]
+}
+
+// ============================================================================
+// USER SETTINGS QUERIES
+// ============================================================================
+
+export async function getUserSettings(userId: string): Promise<UserSettings | undefined> {
+  const [result] = await db.select()
+    .from(userSettings)
+    .where(eq(userSettings.userId, userId))
+    .limit(1)
+
+  if (!result) return undefined
+
+  // Decrypt the API key before returning, handling legacy plaintext values
+  if (result.openaiApiKey) {
+    result.openaiApiKey = isEncrypted(result.openaiApiKey)
+      ? decrypt(result.openaiApiKey)
+      : result.openaiApiKey
+  }
+
+  return result
+}
+
+export async function upsertUserSettings(
+  userId: string,
+  updates: { openaiApiKey?: string }
+): Promise<UserSettings> {
+  const encryptedUpdates = {
+    ...updates,
+    ...(updates.openaiApiKey ? { openaiApiKey: encrypt(updates.openaiApiKey) } : {}),
+  }
+
+  const [result] = await db.insert(userSettings)
+    .values({ userId, ...encryptedUpdates })
+    .onConflictDoUpdate({
+      target: userSettings.userId,
+      set: { ...encryptedUpdates, updatedAt: new Date() },
+    })
+    .returning()
+
+  // Return with decrypted key so callers get the plaintext
+  if (result.openaiApiKey) {
+    result.openaiApiKey = decrypt(result.openaiApiKey)
+  }
+
+  return result
 }

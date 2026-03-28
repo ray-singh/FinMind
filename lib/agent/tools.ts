@@ -227,19 +227,33 @@ export function createSearchTransactionsTool(userId: string) {
     async ({ searchTerm, category, limit }: { searchTerm?: string; category?: string; limit?: number }): Promise<string> => {
       try {
         const maxResults = Math.min(limit || 20, 50);
-        
-        let transactions;
-        if (searchTerm) {
-          transactions = await searchTransactions(userId, searchTerm, maxResults);
-        } else {
-          transactions = await getTransactions(userId, maxResults);
-        }
 
-        // Filter by category if specified
-        if (category) {
-          transactions = transactions.filter(
-            t => t.category?.toLowerCase() === category.toLowerCase()
-          );
+        type TxRow = { id: number; date: string; description: string; amount: number; category: string | null }
+        let transactions: TxRow[];
+        if (searchTerm && category) {
+          transactions = await executeRawQuery(
+            userId,
+            `SELECT id, date, description, amount, category
+             FROM transactions
+             WHERE description ILIKE '%${searchTerm.replace(/'/g, "''")}%'
+               AND LOWER(category) = LOWER('${category.replace(/'/g, "''")}')
+             ORDER BY date DESC
+             LIMIT ${maxResults}`
+          ) as unknown as TxRow[];
+        } else if (category) {
+          // Category-only: push filter to SQL instead of fetching and discarding in JS
+          transactions = await executeRawQuery(
+            userId,
+            `SELECT id, date, description, amount, category
+             FROM transactions
+             WHERE LOWER(category) = LOWER('${category.replace(/'/g, "''")}')
+             ORDER BY date DESC
+             LIMIT ${maxResults}`
+          ) as unknown as TxRow[];
+        } else if (searchTerm) {
+          transactions = await searchTransactions(userId, searchTerm, maxResults) as unknown as TxRow[];
+        } else {
+          transactions = await getTransactions(userId, maxResults) as unknown as TxRow[];
         }
 
         return JSON.stringify({
@@ -319,11 +333,38 @@ export function createComparePeriodsTool(userId: string) {
         const range1 = getDateRange(period1);
         const range2 = getDateRange(period2);
 
-        const data1 = await getFinancialSummary(userId, range1);
-        const data2 = await getFinancialSummary(userId, range2);
+        let data1, data2;
 
-        const expenseChange = data1.totalExpenses && data2.totalExpenses 
-          ? ((Number(data1.totalExpenses) - Number(data2.totalExpenses)) / Number(data2.totalExpenses) * 100).toFixed(1)
+        if (category) {
+          // Category-scoped comparison via SQL
+          const buildCategoryQuery = (range: { start: string; end: string }) =>
+            executeRawQuery(
+              userId,
+              `SELECT
+                COUNT(*) AS total_transactions,
+                COALESCE(ROUND(ABS(SUM(CASE WHEN amount < 0 THEN amount ELSE 0 END))::numeric, 2), 0) AS total_expenses,
+                COALESCE(ROUND(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END)::numeric, 2), 0) AS total_income
+               FROM transactions
+               WHERE date >= '${range.start}' AND date <= '${range.end}'
+               AND LOWER(category) = LOWER('${category.replace(/'/g, "''")}')`
+            );
+          const [r1, r2] = await Promise.all([
+            buildCategoryQuery(range1),
+            buildCategoryQuery(range2),
+          ]);
+          data1 = r1[0] ?? {};
+          data2 = r2[0] ?? {};
+        } else {
+          [data1, data2] = await Promise.all([
+            getFinancialSummary(userId, range1),
+            getFinancialSummary(userId, range2),
+          ]);
+        }
+
+        const exp1 = Number((data1 as Record<string, unknown>).totalExpenses ?? (data1 as Record<string, unknown>).total_expenses ?? 0);
+        const exp2 = Number((data2 as Record<string, unknown>).totalExpenses ?? (data2 as Record<string, unknown>).total_expenses ?? 0);
+        const expenseChange = exp2 !== 0
+          ? ((exp1 - exp2) / exp2 * 100).toFixed(1)
           : null;
 
         return JSON.stringify({
@@ -650,5 +691,3 @@ export function createFinanceTools(userId: string) {
   ];
 }
 
-// For backward compatibility
-export const financeTools = createFinanceTools("");

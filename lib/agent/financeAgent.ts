@@ -1,8 +1,10 @@
-import { BaseMessage, HumanMessage, AIMessage, ToolMessage } from "@langchain/core/messages";
+import { BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
 import { StateGraph, Annotation, END, START } from "@langchain/langgraph";
 import { ToolNode } from "@langchain/langgraph/prebuilt";
 import { createFinanceTools } from "./tools";
+
+const MAX_ITERATIONS = 10;
 
 import * as dotenv from "dotenv";
 dotenv.config({ path: '.env.local' })
@@ -12,11 +14,6 @@ const AgentState = Annotation.Root({
   messages: Annotation<BaseMessage[]>({
     reducer: (x, y) => x.concat(y),
     default: () => [],
-  }),
-  // Track agent reasoning/planning
-  reasoning: Annotation<string>({
-    reducer: (_x, y) => y,
-    default: () => "",
   }),
   // Track which tools were used
   toolsUsed: Annotation<string[]>({
@@ -51,14 +48,14 @@ const AgentState = Annotation.Root({
 type AgentStateType = typeof AgentState.State;
 
 // Create the model with tool binding for a specific user
-function createModel(userId: string) {
-  const apiKey = process.env.OPENAI_API_KEY;
+function createModel(userId: string, openaiApiKey?: string) {
+  const apiKey = openaiApiKey || process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    throw new Error("OPENAI_API_KEY is not set");
+    throw new Error("OpenAI API key is not configured. Please add your API key in the dashboard.");
   }
 
   const tools = createFinanceTools(userId);
-  
+
   return {
     model: new ChatOpenAI({
       modelName: "gpt-4o-mini",
@@ -85,6 +82,7 @@ IMPORTANT GUIDELINES:
 - Proactively provide context (e.g., "This is 20% higher than last month")
 - If data is insufficient, explain what's missing
 - Be conversational but concise
+- Respond in plain text only — do NOT use markdown formatting (no bold, no headers, no bullet points, no asterisks)
 - For spending questions, use ABS() on amounts since expenses are negative
 
 TOOL SELECTION STRATEGY:
@@ -108,18 +106,18 @@ When users correct a category, the system can learn and create rules for future 
 When you have enough information to answer, provide a clear, helpful response.`;
 
 // Agent node that decides what to do next
-function createAgentNode(userId: string) {
+function createAgentNode(userId: string, openaiApiKey?: string) {
+  // Create model once — not on every invocation
+  const { model } = createModel(userId, openaiApiKey);
+  const systemMessage = new SystemMessage(SYSTEM_PROMPT);
+
   return async function agentNode(state: AgentStateType): Promise<Partial<AgentStateType>> {
-    const { model } = createModel(userId);
-    
-    // Add system message if this is the first call
-    const messages = state.messages.length === 0 || 
-      (state.messages.length > 0 && state.messages[0]._getType() !== "system")
-      ? [{ role: "system", content: SYSTEM_PROMPT }, ...state.messages]
-      : state.messages;
+    // Prepend system message only if not already present
+    const messages = state.messages.length > 0 && state.messages[0]._getType() === "system"
+      ? state.messages
+      : [systemMessage, ...state.messages];
 
     const response = await model.invoke(messages);
-    
     return { messages: [response] };
   };
 }
@@ -237,8 +235,18 @@ async function responseFormatterNode(state: AgentStateType): Promise<Partial<Age
     }
   }
   
+  // Strip markdown formatting so the chat UI renders plain text
+  const plainContent = content
+    .replace(/\*\*(.+?)\*\*/g, '$1')   // bold
+    .replace(/\*(.+?)\*/g, '$1')        // italic
+    .replace(/^#{1,6}\s+/gm, '')        // headings
+    .replace(/^[-*]\s+/gm, '• ')        // unordered lists → bullet
+    .replace(/^\d+\.\s+/gm, '')         // ordered lists
+    .replace(/`(.+?)`/g, '$1')          // inline code
+    .trim();
+
   return {
-    finalResponse: content,
+    finalResponse: plainContent,
     chartData,
   };
 }
@@ -246,25 +254,32 @@ async function responseFormatterNode(state: AgentStateType): Promise<Partial<Age
 // Routing function - decides whether to continue with tools or end
 function shouldContinue(state: AgentStateType): "tools" | "respond" | typeof END {
   const lastMessage = state.messages[state.messages.length - 1];
-  
+
   if (lastMessage._getType() !== "ai") {
     return END;
   }
-  
+
   const aiMessage = lastMessage as AIMessage;
-  
+
+  // Guard against infinite loops: count AI messages as a proxy for iterations
+  const iterationCount = state.messages.filter(m => m._getType() === "ai").length;
+  if (iterationCount >= MAX_ITERATIONS) {
+    console.warn(`[Agent] Reached max iterations (${MAX_ITERATIONS}), forcing response`)
+    return "respond";
+  }
+
   // If there are tool calls, route to tools
   if (aiMessage.tool_calls && aiMessage.tool_calls.length > 0) {
     return "tools";
   }
-  
+
   // Otherwise, format the response and end
   return "respond";
 }
 
 // Build the graph for a specific user
-function createFinanceAgentGraph(userId: string) {
-  const agentNode = createAgentNode(userId);
+function createFinanceAgentGraph(userId: string, openaiApiKey?: string) {
+  const agentNode = createAgentNode(userId, openaiApiKey);
   const toolNodeWithTracking = createToolNodeWithTracking(userId);
   
   const workflow = new StateGraph(AgentState)
@@ -284,7 +299,7 @@ function createFinanceAgentGraph(userId: string) {
 }
 
 // Main function to run the agent for a specific user
-export async function runFinanceAgent(userQuery: string, userId: string): Promise<{
+export async function runFinanceAgent(userQuery: string, userId: string, openaiApiKey?: string): Promise<{
   response: string;
   chartData: AgentStateType["chartData"];
   executedSQL: string;
@@ -294,10 +309,10 @@ export async function runFinanceAgent(userQuery: string, userId: string): Promis
   console.log('[Agent] Starting finance agent for user:', userId)
   console.log('[Agent] Query:', userQuery)
   console.log('[Agent] DATABASE_URL set:', !!process.env.DATABASE_URL)
-  console.log('[Agent] OPENAI_API_KEY set:', !!process.env.OPENAI_API_KEY)
-  
+  console.log('[Agent] OPENAI_API_KEY set:', !!(openaiApiKey || process.env.OPENAI_API_KEY))
+
   try {
-    const graph = createFinanceAgentGraph(userId);
+    const graph = createFinanceAgentGraph(userId, openaiApiKey);
     
     const initialState = {
       messages: [new HumanMessage(userQuery)],

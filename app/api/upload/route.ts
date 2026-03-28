@@ -5,6 +5,7 @@ import { insertTransaction, clearTransactions } from '@/lib/db/queries'
 import { getTransactionType, parseDate, parseAmount } from '@/lib/categorization'
 import { batchCategorize, CategorizationResult } from '@/lib/smartCategorization'
 import { indexUserTransactions } from '@/lib/rag'
+import { uploadCsvToS3 } from '@/lib/s3'
 
 export async function POST(request: NextRequest) {
   try {
@@ -29,6 +30,14 @@ export async function POST(request: NextRequest) {
     }
 
     const text = await file.text()
+
+    // Store raw CSV in S3 (best-effort — don't fail the upload if S3 is not configured)
+    let s3Key: string | null = null
+    try {
+      s3Key = await uploadCsvToS3(userId, file.name, text)
+    } catch (s3Error) {
+      console.warn('S3 upload skipped:', s3Error instanceof Error ? s3Error.message : s3Error)
+    }
 
     // Parse CSV
     const result = Papa.parse(text, {
@@ -140,6 +149,7 @@ export async function POST(request: NextRequest) {
         byAI: methodCounts['ai'] || 0,
         uncategorized: methodCounts['default'] || 0,
       },
+      s3Key: s3Key ?? undefined,
       errors: errors.length > 0 ? errors : undefined,
     })
   } catch (error) {

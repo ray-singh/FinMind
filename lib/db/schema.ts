@@ -89,3 +89,20 @@ export type NewVectorStoreDoc = typeof vectorStore.$inferInsert
 
 // Document types enum
 export type DocumentType = 'transaction' | 'category_rule' | 'query_example' | 'schema'
+
+// ============================================================================
+// USER SETTINGS TABLE
+// ============================================================================
+
+export const userSettings = pgTable('user_settings', {
+  id: serial('id').primaryKey(),
+  userId: text('user_id').notNull().unique(),
+  openaiApiKey: text('openai_api_key'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => ({
+  userIdIdx: uniqueIndex('idx_user_settings_user_id').on(table.userId),
+}))
+
+export type UserSettings = typeof userSettings.$inferSelect
+export type NewUserSettings = typeof userSettings.$inferInsert

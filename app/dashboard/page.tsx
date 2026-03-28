@@ -8,6 +8,7 @@ import Dashboard from '@/components/Dashboard'
 import TransactionsViewer from '@/components/TransactionsViewer'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import Header from '@/components/Header'
+import ApiKeyModal from '@/components/ApiKeyModal'
 
 // Force dynamic rendering due to authentication
 export const dynamic = 'force-dynamic'
@@ -16,10 +17,12 @@ export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<'upload' | 'chat' | 'transactions' | 'dashboard'>('dashboard')
   const [isDataLoaded, setIsDataLoaded] = useState(false)
   const [transactionCount, setTransactionCount] = useState(0)
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false)
 
   // Check if there's existing data on mount
   useEffect(() => {
     checkExistingData()
+    checkApiKey()
   }, [])
 
   const checkExistingData = async () => {
@@ -37,6 +40,20 @@ export default function DashboardPage() {
     }
   }
 
+  const checkApiKey = async () => {
+    try {
+      const res = await fetch('/api/user-settings')
+      if (res.ok) {
+        const data = await res.json()
+        if (!data.hasOpenaiApiKey) {
+          setShowApiKeyModal(true)
+        }
+      }
+    } catch {
+      // Silently fail — don't block the user
+    }
+  }
+
   const handleUploadSuccess = () => {
     setIsDataLoaded(true)
     checkExistingData()
@@ -44,6 +61,9 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
+      {showApiKeyModal && (
+        <ApiKeyModal onSaved={() => setShowApiKeyModal(false)} />
+      )}
       <Header />
       
       <main className="container mx-auto px-4 py-8 max-w-7xl">

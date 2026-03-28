@@ -1,0 +1,147 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 592" width="900" height="592" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif">
+
+  <!-- Page background -->
+  <rect width="900" height="592" fill="#F8FAFC" rx="8"/>
+
+  <!-- ══════════════════════════════════════════
+       LAYER 1: BROWSER
+  ══════════════════════════════════════════ -->
+  <rect x="16" y="16" width="868" height="120" rx="12" fill="#EFF6FF" stroke="#93C5FD" stroke-width="1.5"/>
+  <rect x="16" y="16" width="196" height="26" rx="8" fill="#BFDBFE"/>
+  <text x="114" y="34" font-size="11" font-weight="700" fill="#1D4ED8" text-anchor="middle" letter-spacing="0.5">BROWSER (CLIENT)</text>
+
+  <!-- Landing Page -->
+  <rect x="32" y="50" width="178" height="70" rx="8" fill="white" stroke="#BFDBFE" stroke-width="1.5"/>
+  <text x="121" y="76" font-size="11" font-weight="600" fill="#1E40AF" text-anchor="middle">Landing Page</text>
+  <text x="121" y="93" font-size="9" fill="#6B7280" text-anchor="middle">/ (public route)</text>
+  <text x="121" y="108" font-size="9" fill="#6B7280" text-anchor="middle">Sign In · Get Started</text>
+
+  <!-- Auth Pages -->
+  <rect x="224" y="50" width="178" height="70" rx="8" fill="white" stroke="#BFDBFE" stroke-width="1.5"/>
+  <text x="313" y="76" font-size="11" font-weight="600" fill="#1E40AF" text-anchor="middle">Auth Pages</text>
+  <text x="313" y="93" font-size="9" fill="#6B7280" text-anchor="middle">/sign-in  /sign-up</text>
+  <text x="313" y="108" font-size="9" fill="#6B7280" text-anchor="middle">Clerk-powered UI</text>
+
+  <!-- Dashboard -->
+  <rect x="416" y="50" width="218" height="70" rx="8" fill="white" stroke="#BFDBFE" stroke-width="1.5"/>
+  <text x="525" y="76" font-size="11" font-weight="600" fill="#1E40AF" text-anchor="middle">Dashboard  /dashboard</text>
+  <text x="525" y="93" font-size="9" fill="#6B7280" text-anchor="middle">Overview · AI Chat · Transactions</text>
+  <text x="525" y="108" font-size="9" fill="#6B7280" text-anchor="middle">Upload · Analytics</text>
+
+  <!-- API Key Modal -->
+  <rect x="648" y="50" width="220" height="70" rx="8" fill="white" stroke="#BFDBFE" stroke-width="1.5"/>
+  <text x="758" y="76" font-size="11" font-weight="600" fill="#1E40AF" text-anchor="middle">API Key Modal</text>
+  <text x="758" y="93" font-size="9" fill="#6B7280" text-anchor="middle">Post-login onboarding</text>
+  <text x="758" y="108" font-size="9" fill="#6B7280" text-anchor="middle">Key encrypted at rest</text>
+
+  <!-- Arrow: Browser → Server -->
+  <line x1="450" y1="136" x2="450" y2="170" stroke="#94A3B8" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <polygon points="444,167 450,176 456,167" fill="#94A3B8"/>
+
+  <!-- ══════════════════════════════════════════
+       LAYER 2: NEXT.JS SERVER
+  ══════════════════════════════════════════ -->
+  <rect x="16" y="180" width="868" height="216" rx="12" fill="#F0FDF4" stroke="#86EFAC" stroke-width="1.5"/>
+  <rect x="16" y="180" width="210" height="26" rx="8" fill="#BBF7D0"/>
+  <text x="121" y="198" font-size="11" font-weight="700" fill="#15803D" text-anchor="middle" letter-spacing="0.5">NEXT.JS SERVER</text>
+
+  <!-- Clerk Middleware bar -->
+  <rect x="32" y="212" width="836" height="27" rx="6" fill="#DCFCE7" stroke="#6EE7B7" stroke-width="1"/>
+  <text x="450" y="230" font-size="10" font-weight="600" fill="#166534" text-anchor="middle">Clerk Middleware — enforces authenticated session on all /dashboard and /api/* routes</text>
+
+  <!-- API Routes label -->
+  <text x="32" y="260" font-size="10" font-weight="700" fill="#374151" letter-spacing="0.5">API ROUTES</text>
+
+  <!-- Row 1 -->
+  <rect x="32"  y="268" width="138" height="28" rx="6" fill="#DBEAFE" stroke="#93C5FD" stroke-width="1"/>
+  <text x="101" y="286" font-size="9.5" fill="#1E40AF" font-weight="500" text-anchor="middle">/api/upload</text>
+
+  <rect x="180" y="268" width="138" height="28" rx="6" fill="#DBEAFE" stroke="#93C5FD" stroke-width="1"/>
+  <text x="249" y="286" font-size="9.5" fill="#1E40AF" font-weight="500" text-anchor="middle">/api/query</text>
+
+  <rect x="328" y="268" width="158" height="28" rx="6" fill="#DBEAFE" stroke="#93C5FD" stroke-width="1"/>
+  <text x="407" y="286" font-size="9.5" fill="#1E40AF" font-weight="500" text-anchor="middle">/api/transactions</text>
+
+  <!-- Row 2 -->
+  <rect x="32"  y="306" width="138" height="28" rx="6" fill="#DBEAFE" stroke="#93C5FD" stroke-width="1"/>
+  <text x="101" y="324" font-size="9.5" fill="#1E40AF" font-weight="500" text-anchor="middle">/api/analytics</text>
+
+  <rect x="180" y="306" width="158" height="28" rx="6" fill="#DBEAFE" stroke="#93C5FD" stroke-width="1"/>
+  <text x="259" y="324" font-size="9.5" fill="#1E40AF" font-weight="500" text-anchor="middle">/api/user-settings</text>
+
+  <rect x="348" y="306" width="138" height="28" rx="6" fill="#DBEAFE" stroke="#93C5FD" stroke-width="1"/>
+  <text x="417" y="324" font-size="9.5" fill="#1E40AF" font-weight="500" text-anchor="middle">/api/categories</text>
+
+  <!-- Smart Categorization -->
+  <rect x="32" y="344" width="454" height="36" rx="6" fill="#D1FAE5" stroke="#6EE7B7" stroke-width="1"/>
+  <text x="259" y="359" font-size="9.5" fill="#065F46" font-weight="600" text-anchor="middle">Smart Categorization  —  lib/smartCategorization.ts</text>
+  <text x="259" y="373" font-size="8.5" fill="#047857" text-anchor="middle">Rule-based  ·  Pattern matching  ·  AI fallback</text>
+
+  <!-- Divider -->
+  <line x1="514" y1="252" x2="514" y2="382" stroke="#BBF7D0" stroke-width="1.5"/>
+
+  <!-- Internal Libraries label -->
+  <text x="530" y="260" font-size="10" font-weight="700" fill="#374151" letter-spacing="0.5">INTERNAL LIBRARIES</text>
+
+  <!-- LangGraph Agent -->
+  <rect x="530" y="268" width="338" height="36" rx="6" fill="#FAF5FF" stroke="#DDD6FE" stroke-width="1"/>
+  <text x="699" y="283" font-size="10" fill="#6D28D9" font-weight="600" text-anchor="middle">LangGraph Agent  —  lib/agent/</text>
+  <text x="699" y="297" font-size="8.5" fill="#7C3AED" text-anchor="middle">11 tools  ·  multi-step reasoning  ·  GPT-4o-mini</text>
+
+  <!-- AES-256-GCM Encryption -->
+  <rect x="530" y="314" width="338" height="28" rx="6" fill="#FFF7ED" stroke="#FED7AA" stroke-width="1"/>
+  <text x="699" y="332" font-size="9.5" fill="#C2410C" font-weight="600" text-anchor="middle">AES-256-GCM Encryption  —  lib/encryption.ts</text>
+
+  <!-- Drizzle ORM -->
+  <rect x="530" y="352" width="338" height="28" rx="6" fill="#FFF1F2" stroke="#FECDD3" stroke-width="1"/>
+  <text x="699" y="370" font-size="9.5" fill="#BE123C" font-weight="600" text-anchor="middle">Drizzle ORM  —  type-safe PostgreSQL queries</text>
+
+  <!-- Arrow: Server → External -->
+  <line x1="450" y1="396" x2="450" y2="428" stroke="#94A3B8" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <polygon points="444,425 450,434 456,425" fill="#94A3B8"/>
+
+  <!-- ══════════════════════════════════════════
+       LAYER 3: EXTERNAL SERVICES
+  ══════════════════════════════════════════ -->
+
+  <!-- Clerk -->
+  <rect x="16" y="436" width="196" height="140" rx="12" fill="#FEFCE8" stroke="#FDE047" stroke-width="1.5"/>
+  <text x="114" y="461" font-size="12" font-weight="700" fill="#854D0E" text-anchor="middle">Clerk</text>
+  <text x="114" y="478" font-size="9.5" fill="#92400E" text-anchor="middle">Authentication</text>
+  <line x1="44" y1="485" x2="184" y2="485" stroke="#FDE68A" stroke-width="1"/>
+  <text x="114" y="500" font-size="9" fill="#78350F" text-anchor="middle">Email + social login</text>
+  <text x="114" y="515" font-size="9" fill="#78350F" text-anchor="middle">Session tokens</text>
+  <text x="114" y="530" font-size="9" fill="#78350F" text-anchor="middle">User management</text>
+  <text x="114" y="562" font-size="8.5" fill="#A16207" text-anchor="middle" font-style="italic">dashboard.clerk.com</text>
+
+  <!-- NeonDB -->
+  <rect x="228" y="436" width="206" height="140" rx="12" fill="#EFF6FF" stroke="#93C5FD" stroke-width="1.5"/>
+  <text x="331" y="461" font-size="12" font-weight="700" fill="#1E40AF" text-anchor="middle">NeonDB</text>
+  <text x="331" y="478" font-size="9.5" fill="#1D4ED8" text-anchor="middle">Serverless PostgreSQL</text>
+  <line x1="258" y1="485" x2="404" y2="485" stroke="#BFDBFE" stroke-width="1"/>
+  <text x="331" y="500" font-size="9" fill="#1E3A8A" text-anchor="middle">transactions · user_settings</text>
+  <text x="331" y="515" font-size="9" fill="#1E3A8A" text-anchor="middle">category_rules · vector_store</text>
+  <text x="331" y="530" font-size="9" fill="#1E3A8A" text-anchor="middle">pgvector — RAG / embeddings</text>
+  <text x="331" y="562" font-size="8.5" fill="#3B82F6" text-anchor="middle" font-style="italic">console.neon.tech</text>
+
+  <!-- OpenAI -->
+  <rect x="450" y="436" width="206" height="140" rx="12" fill="#F0FDF4" stroke="#86EFAC" stroke-width="1.5"/>
+  <text x="553" y="461" font-size="12" font-weight="700" fill="#14532D" text-anchor="middle">OpenAI</text>
+  <text x="553" y="478" font-size="9.5" fill="#166534" text-anchor="middle">GPT-4o-mini</text>
+  <line x1="480" y1="485" x2="626" y2="485" stroke="#BBF7D0" stroke-width="1"/>
+  <text x="553" y="500" font-size="9" fill="#15803D" text-anchor="middle">AI chat + SQL generation</text>
+  <text x="553" y="515" font-size="9" fill="#15803D" text-anchor="middle">Smart categorization</text>
+  <text x="553" y="530" font-size="9" fill="#15803D" text-anchor="middle">text-embedding-3-small</text>
+  <text x="553" y="562" font-size="8.5" fill="#16A34A" text-anchor="middle" font-style="italic">platform.openai.com</text>
+
+  <!-- AWS S3 -->
+  <rect x="672" y="436" width="212" height="140" rx="12" fill="#FFF7ED" stroke="#FED7AA" stroke-width="1.5"/>
+  <text x="778" y="461" font-size="12" font-weight="700" fill="#9A3412" text-anchor="middle">AWS S3</text>
+  <text x="778" y="478" font-size="9.5" fill="#C2410C" text-anchor="middle">CSV File Storage</text>
+  <line x1="702" y1="485" x2="854" y2="485" stroke="#FED7AA" stroke-width="1"/>
+  <text x="778" y="500" font-size="9" fill="#9A3412" text-anchor="middle">uploads/{userId}/{timestamp}</text>
+  <text x="778" y="515" font-size="9" fill="#9A3412" text-anchor="middle">Raw bank statement archive</text>
+  <text x="778" y="530" font-size="9" fill="#9A3412" text-anchor="middle">Best-effort (optional)</text>
+  <text x="778" y="562" font-size="8.5" fill="#EA580C" text-anchor="middle" font-style="italic">aws.amazon.com/s3</text>
+
+</svg>

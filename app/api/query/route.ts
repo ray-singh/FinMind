@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 import { runFinanceAgent } from '@/lib/agent'
+import { getUserSettings } from '@/lib/db/queries'
 import * as dotenv from "dotenv";
 dotenv.config({ path: '.env.local' })
 
@@ -24,12 +25,15 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Check if OpenAI API key is configured
-    if (!process.env.OPENAI_API_KEY) {
+    // Resolve API key: user-stored key takes priority, fall back to env var
+    const userSettings = await getUserSettings(userId)
+    const openaiApiKey = userSettings?.openaiApiKey || process.env.OPENAI_API_KEY
+
+    if (!openaiApiKey) {
       return NextResponse.json(
-        { 
+        {
           error: 'OpenAI API key not configured',
-          message: 'Please add your OPENAI_API_KEY to .env.local'
+          message: 'Please add your OpenAI API key in the dashboard settings.',
         },
         { status: 500 }
       )
@@ -37,7 +41,7 @@ export async function POST(request: NextRequest) {
 
     // Use the LangGraph-based finance agent with user isolation
     if (useAgent) {
-      const agentResult = await runFinanceAgent(query, userId)
+      const agentResult = await runFinanceAgent(query, userId, openaiApiKey)
       
       return NextResponse.json({
         query,
