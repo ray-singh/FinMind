@@ -14,7 +14,8 @@
     "db:studio": "drizzle-kit studio",
     "db:migrate": "drizzle-kit migrate",
     "db:init": "npx tsx scripts/db-init.ts",
-    "backfill-embeddings": "npx tsx scripts/backfill-embeddings.ts"
+    "backfill-embeddings": "npx tsx scripts/backfill-embeddings.ts",
+    "eval": "npx tsx scripts/eval.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1019.0",
