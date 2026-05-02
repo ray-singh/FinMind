@@ -673,6 +673,243 @@ The pattern is automatically normalized (prefixes like SQ*, PP* are stripped).`,
 }
 
 /**
+ * Create Remember Preference Tool - persist a user preference in the vector store
+ */
+export function createRememberPreferenceTool(userId: string) {
+  return tool(
+    async ({ preference, category }: { preference: string; category?: string }): Promise<string> => {
+      try {
+        const { upsertDocument } = await import('../vectorStore')
+        // Use a deterministic sourceId so re-stating the same preference upserts, not duplicates
+        const sourceId = `pref_${Buffer.from(preference.toLowerCase().trim()).toString('base64').slice(0, 32)}`
+        await upsertDocument(userId, 'preference', sourceId, preference, {
+          category: category || 'general',
+          savedAt: new Date().toISOString(),
+        })
+        return JSON.stringify({
+          success: true,
+          message: `Remembered: "${preference}"`,
+          sourceId,
+        })
+      } catch (error) {
+        return JSON.stringify({
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to save preference',
+        })
+      }
+    },
+    {
+      name: 'remember_preference',
+      description: `Save a user preference or personal finance fact to long-term memory.
+Use this when the user states something persistent about themselves, such as:
+- "My monthly budget is $3,000"
+- "I consider Spotify a necessity, not a luxury"
+- "Ignore my business account when calculating personal spending"
+- "My rent is $1,500/month"
+These preferences are recalled in future sessions to personalise answers.`,
+      schema: z.object({
+        preference: z.string().describe('The preference or fact to remember, in plain English'),
+        category: z.string().optional().describe('Optional label, e.g. "budget", "account", "category_rule"'),
+      }),
+    }
+  )
+}
+
+/**
+ * Create Recall Preferences Tool - retrieve relevant saved preferences from the vector store
+ */
+export function createRecallPreferencesTool(userId: string) {
+  return tool(
+    async ({ query, topK }: { query?: string; topK?: number }): Promise<string> => {
+      try {
+        const { searchSimilar } = await import('../vectorStore')
+        const searchQuery = query || 'user preferences and personal finance facts'
+        const results = await searchSimilar(userId, searchQuery, {
+          topK: topK || 10,
+          docTypes: ['preference'],
+          minScore: 0.3,
+        })
+
+        if (results.length === 0) {
+          return JSON.stringify({
+            success: true,
+            message: 'No saved preferences found.',
+            preferences: [],
+          })
+        }
+
+        return JSON.stringify({
+          success: true,
+          count: results.length,
+          preferences: results.map(r => ({
+            text: r.document.text,
+            category: (r.document.metadata as Record<string, unknown>).category ?? 'general',
+            savedAt: (r.document.metadata as Record<string, unknown>).savedAt ?? null,
+            relevanceScore: Math.round(r.score * 100) / 100,
+          })),
+        })
+      } catch (error) {
+        return JSON.stringify({
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to recall preferences',
+        })
+      }
+    },
+    {
+      name: 'recall_preferences',
+      description: `Retrieve previously saved user preferences and personal finance facts from long-term memory.
+Call this at the start of any query where personal context could change the answer, e.g.:
+- Questions about budgets or savings goals
+- Questions where the user has previously excluded certain accounts
+- Any time the user says "as I mentioned before" or "you know my situation"
+Returns the most semantically relevant preferences for the current query.`,
+      schema: z.object({
+        query: z.string().optional().describe('Topic to search preferences for (defaults to all preferences)'),
+        topK: z.number().optional().describe('Max preferences to return (default 10)'),
+      }),
+    }
+  )
+}
+
+/**
+ * Create Detect Anomalies Tool - surface statistically unusual transactions and months
+ * Uses IQR (interquartile range) for per-category outlier detection and Z-score for
+ * month-level spending anomalies. Pure SQL + math.
+ */
+export function createDetectAnomaliesTool(userId: string) {
+  return tool(
+    async ({ category, timeframe }: { category?: string; timeframe?: string }): Promise<string> => {
+      console.log('[Tool:detect_anomalies] user:', userId, 'category:', category, 'timeframe:', timeframe)
+      try {
+        // Build optional date filter
+        const today = new Date()
+        let dateClause = ''
+        if (timeframe === 'this_month') {
+          const start = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0]
+          dateClause = `AND date >= '${start}'`
+        } else if (timeframe === 'last_3_months') {
+          const start = new Date(today.getFullYear(), today.getMonth() - 3, 1).toISOString().split('T')[0]
+          dateClause = `AND date >= '${start}'`
+        } else if (timeframe === 'this_year') {
+          const start = new Date(today.getFullYear(), 0, 1).toISOString().split('T')[0]
+          dateClause = `AND date >= '${start}'`
+        }
+
+        const categoryClause = category
+          ? `AND LOWER(category) = LOWER('${category.replace(/'/g, "''")}')`
+          : ''
+
+        // ── 1. Transaction-level outliers (IQR method) ──────────────────────
+        // Compute Q1, Q3, IQR per category; flag rows where ABS(amount) > Q3 + 1.5*IQR
+        const txOutliers = await executeRawQuery(userId, `
+          WITH stats AS (
+            SELECT
+              category,
+              PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY ABS(amount)) AS q1,
+              PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY ABS(amount)) AS q3
+            FROM transactions
+            WHERE amount < 0
+              ${dateClause}
+              ${categoryClause}
+            GROUP BY category
+          ),
+          bounds AS (
+            SELECT category, q1, q3, (q3 - q1) * 1.5 AS iqr_fence
+            FROM stats
+          )
+          SELECT
+            t.id,
+            t.date,
+            t.description,
+            t.category,
+            ROUND(ABS(t.amount)::numeric, 2) AS amount,
+            ROUND(b.q3::numeric, 2)          AS typical_max,
+            ROUND((b.q3 + b.iqr_fence)::numeric, 2) AS outlier_threshold
+          FROM transactions t
+          JOIN bounds b ON LOWER(t.category) = LOWER(b.category)
+          WHERE t.amount < 0
+            AND ABS(t.amount) > (b.q3 + b.iqr_fence)
+            ${dateClause}
+            ${categoryClause}
+          ORDER BY ABS(t.amount) DESC
+          LIMIT 20
+        `)
+
+        // ── 2. Month-level anomalies (Z-score) ─────────────────────────────
+        const monthOutliers = await executeRawQuery(userId, `
+          WITH monthly AS (
+            SELECT
+              TO_CHAR(date::date, 'YYYY-MM') AS month,
+              SUM(ABS(amount))               AS total_spent
+            FROM transactions
+            WHERE amount < 0
+              ${categoryClause}
+            GROUP BY 1
+          ),
+          stats AS (
+            SELECT
+              AVG(total_spent)    AS mean,
+              STDDEV(total_spent) AS stddev
+            FROM monthly
+          )
+          SELECT
+            m.month,
+            ROUND(m.total_spent::numeric, 2)                       AS total_spent,
+            ROUND(stats.mean::numeric, 2)                          AS avg_monthly,
+            ROUND(
+              CASE WHEN stats.stddev > 0
+                THEN ((m.total_spent - stats.mean) / stats.stddev)
+                ELSE 0
+              END::numeric, 2
+            ) AS z_score
+          FROM monthly m, stats
+          WHERE stats.stddev > 0
+            AND ABS((m.total_spent - stats.mean) / stats.stddev) > 1.5
+          ORDER BY ABS((m.total_spent - stats.mean) / stats.stddev) DESC
+        `)
+
+        return JSON.stringify({
+          success: true,
+          transactionAnomalies: txOutliers,
+          monthAnomalies: monthOutliers,
+          summary: {
+            unusualTransactions: txOutliers.length,
+            unusualMonths: monthOutliers.length,
+          },
+        })
+      } catch (error) {
+        console.error('[Tool:detect_anomalies] Error:', error)
+        return JSON.stringify({
+          success: false,
+          error: error instanceof Error ? error.message : 'Anomaly detection failed',
+        })
+      }
+    },
+    {
+      name: 'detect_anomalies',
+      description: `Detect statistically unusual spending — both individual transactions and entire months.
+
+Uses two methods:
+- IQR (interquartile range): flags transactions whose absolute amount exceeds Q3 + 1.5×IQR for their category
+- Z-score: flags months where total spending is more than 1.5 standard deviations from the user's mean
+
+Use this when users ask about: unexpected charges, unusually expensive months, spending spikes, outliers, or "anything weird".
+
+Optional filters:
+- category: limit analysis to one category (e.g. "Dining", "Groceries")
+- timeframe: "this_month" | "last_3_months" | "this_year" | omit for all-time`,
+      schema: z.object({
+        category: z.string().optional().describe('Limit analysis to a specific category'),
+        timeframe: z
+          .enum(['this_month', 'last_3_months', 'this_year'])
+          .optional()
+          .describe('Time window for transaction-level anomalies'),
+      }),
+    }
+  )
+}
+
+/**
  * Create all finance tools for a specific user
  */
 export function createFinanceTools(userId: string) {
@@ -688,6 +925,9 @@ export function createFinanceTools(userId: string) {
     createPreviewCategorizationTool(),
     createRecategorizeTool(userId),
     createLearnCategoryTool(),
+    createDetectAnomaliesTool(userId),
+    createRememberPreferenceTool(userId),
+    createRecallPreferencesTool(userId),
   ];
 }
 

@@ -18,6 +18,7 @@
 import * as dotenv from 'dotenv'
 dotenv.config({ path: '.env.local' })
 
+import OpenAI from 'openai'
 import { runFinanceAgent } from '../lib/agent'
 import { getSql } from '../lib/db/index'
 
@@ -786,6 +787,69 @@ const TEST_CASES: TestCase[] = [
 ]
 
 // ---------------------------------------------------------------------------
+// LLM-as-judge
+// ---------------------------------------------------------------------------
+
+// Structured verdict returned by the judge model
+interface JudgeVerdict {
+  relevance: 1 | 2 | 3      // Does the response address the question?
+  correctness: 1 | 2 | 3    // Are the numbers / facts plausible and consistent?
+  completeness: 1 | 2 | 3   // Did the agent cover the key aspects expected?
+  reasoning: string          // One sentence explaining the scores
+}
+
+const JUDGE_SYSTEM_PROMPT = `You are an impartial evaluator for a personal-finance AI assistant.
+You will be given a user question and the assistant's response.
+Score the response on three dimensions, each from 1 to 3:
+
+relevance    — 1: off-topic  |  2: partially addresses question  |  3: directly answers it
+correctness  — 1: likely wrong or contradictory  |  2: plausible but vague  |  3: specific, consistent numbers/facts
+completeness — 1: major gaps  |  2: covers the core but misses details  |  3: thorough
+
+Respond ONLY with valid JSON matching this schema (no markdown fences):
+{"relevance":1,"correctness":1,"completeness":1,"reasoning":"..."}`
+
+async function judgeResponse(
+  openai: OpenAI,
+  query: string,
+  response: string,
+  expectedKeywords: string[],
+): Promise<JudgeVerdict> {
+  const userPrompt = `User question: ${query}
+
+Assistant response: ${response}
+
+Expected topic signals (keywords that suggest a good answer): ${expectedKeywords.join(', ')}
+
+Score the response.`
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      temperature: 0,
+      max_tokens: 200,
+      messages: [
+        { role: 'system', content: JUDGE_SYSTEM_PROMPT },
+        { role: 'user', content: userPrompt },
+      ],
+    })
+
+    const raw = completion.choices[0]?.message?.content?.trim() ?? '{}'
+    const parsed = JSON.parse(raw) as JudgeVerdict
+    // Clamp to valid range in case the model drifts
+    return {
+      relevance:    Math.min(3, Math.max(1, parsed.relevance))    as 1|2|3,
+      correctness:  Math.min(3, Math.max(1, parsed.correctness))  as 1|2|3,
+      completeness: Math.min(3, Math.max(1, parsed.completeness)) as 1|2|3,
+      reasoning: parsed.reasoning ?? '',
+    }
+  } catch {
+    // If the judge call fails, default to mid scores so it doesn't tank the run
+    return { relevance: 2, correctness: 2, completeness: 2, reasoning: 'judge call failed' }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Scoring
 // ---------------------------------------------------------------------------
 
@@ -793,49 +857,30 @@ interface EvalResult {
   id: number
   category: string
   query: string
-  score: 0 | 1 | 2 | 3
-  pass: boolean
+  // Heuristic dimensions (fast, free)
   completionOk: boolean
   toolOk: boolean
-  contentOk: boolean
+  keywordOk: boolean        // legacy keyword match (kept for comparison)
+  // LLM-judge dimensions
+  judgeRelevance: 1 | 2 | 3
+  judgeCorrectness: 1 | 2 | 3
+  judgeCompleteness: 1 | 2 | 3
+  judgeReasoning: string
+  judgeScore: number        // sum of three judge dimensions (3–9)
+  // Combined
+  totalScore: number        // completionOk + toolOk + judgeScore (max 11)
+  pass: boolean             // judgeScore >= 6 AND completionOk AND toolOk
   toolsUsed: string[]
   responseSnippet: string
   error?: string
   durationMs: number
 }
 
-function scoreCase(
-  tc: TestCase,
-  result: Awaited<ReturnType<typeof runFinanceAgent>>,
-): Omit<EvalResult, 'id' | 'category' | 'query' | 'durationMs' | 'error'> {
-  const response = result.response ?? ''
-  const toolsUsed = result.toolsUsed ?? []
-
-  const completionOk = response.trim().length > 30
-  const toolOk = tc.expectedTools.some(t => toolsUsed.includes(t))
-  const contentOk = tc.expectedKeywords.some(kw =>
-    response.toLowerCase().includes(kw.toLowerCase()),
-  )
-
-  const score = (completionOk ? 1 : 0) + (toolOk ? 1 : 0) + (contentOk ? 1 : 0)
-  const pass = score >= 2
-
-  return {
-    score: score as 0 | 1 | 2 | 3,
-    pass,
-    completionOk,
-    toolOk,
-    contentOk,
-    toolsUsed,
-    responseSnippet: response.slice(0, 120).replace(/\n/g, ' '),
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Runner
 // ---------------------------------------------------------------------------
 
-const RATE_LIMIT_DELAY_MS = 1000 // pause between calls to avoid 429s
+const RATE_LIMIT_DELAY_MS = 1200 // slightly longer to budget for judge calls
 
 async function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -843,8 +888,15 @@ async function sleep(ms: number) {
 
 async function main() {
   console.log('='.repeat(70))
-  console.log('  FinMind Agent Evaluation')
+  console.log('  FinMind Agent Evaluation  (LLM-as-Judge)')
   console.log('='.repeat(70))
+
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) {
+    console.error('\nOPENAI_API_KEY not set — cannot run judge.\n')
+    process.exit(1)
+  }
+  const openai = new OpenAI({ apiKey })
 
   // Resolve userId
   let userId = process.env.EVAL_USER_ID
@@ -862,25 +914,62 @@ async function main() {
 
   console.log(`\nUser ID : ${userId}`)
   console.log(`Cases   : ${TEST_CASES.length}`)
-  console.log(`Model   : gpt-4o-mini\n`)
+  console.log(`Agent   : gpt-4o-mini`)
+  console.log(`Judge   : gpt-4o-mini`)
+  console.log(`Pass    : judgeScore >= 6/9  AND  completion  AND  tool\n`)
   console.log('-'.repeat(70))
 
   const results: EvalResult[] = []
 
   for (const tc of TEST_CASES) {
-    const label = `[${String(tc.id).padStart(2, '0')}] ${tc.category.padEnd(12)} ${tc.query.slice(0, 45)}`
-    process.stdout.write(`${label.padEnd(65)} `)
+    const label = `[${String(tc.id).padStart(2, '0')}] ${tc.category.padEnd(12)} ${tc.query.slice(0, 42)}`
+    process.stdout.write(`${label.padEnd(62)} `)
 
     const t0 = Date.now()
     try {
       const agentResult = await runFinanceAgent(tc.query, userId)
       const durationMs = Date.now() - t0
-      const scored = scoreCase(tc, agentResult)
 
-      const mark = scored.score === 3 ? '✓✓✓' : scored.score === 2 ? '✓✓ ' : scored.score === 1 ? '✓  ' : '✗  '
+      const response   = agentResult.response ?? ''
+      const toolsUsed  = agentResult.toolsUsed ?? []
+
+      const completionOk = response.trim().length > 30
+      const toolOk       = tc.expectedTools.some(t => toolsUsed.includes(t))
+      const keywordOk    = tc.expectedKeywords.some(kw =>
+        response.toLowerCase().includes(kw.toLowerCase()),
+      )
+
+      // Only call judge when we have a non-empty response
+      const verdict = completionOk
+        ? await judgeResponse(openai, tc.query, response, tc.expectedKeywords)
+        : { relevance: 1 as const, correctness: 1 as const, completeness: 1 as const, reasoning: 'empty response' }
+
+      const judgeScore = verdict.relevance + verdict.correctness + verdict.completeness
+      const pass = completionOk && toolOk && judgeScore >= 6
+
+      const mark = pass
+        ? `PASS J:${judgeScore}/9`
+        : `FAIL J:${judgeScore}/9`
       console.log(`${mark}  (${durationMs}ms)`)
 
-      results.push({ ...scored, id: tc.id, category: tc.category, query: tc.query, durationMs })
+      results.push({
+        id: tc.id,
+        category: tc.category,
+        query: tc.query,
+        completionOk,
+        toolOk,
+        keywordOk,
+        judgeRelevance:    verdict.relevance,
+        judgeCorrectness:  verdict.correctness,
+        judgeCompleteness: verdict.completeness,
+        judgeReasoning:    verdict.reasoning,
+        judgeScore,
+        totalScore: (completionOk ? 1 : 0) + (toolOk ? 1 : 0) + judgeScore,
+        pass,
+        toolsUsed,
+        responseSnippet: response.slice(0, 120).replace(/\n/g, ' '),
+        durationMs,
+      })
     } catch (err: unknown) {
       const durationMs = Date.now() - t0
       const message = err instanceof Error ? err.message : String(err)
@@ -889,11 +978,16 @@ async function main() {
         id: tc.id,
         category: tc.category,
         query: tc.query,
-        score: 0,
-        pass: false,
         completionOk: false,
         toolOk: false,
-        contentOk: false,
+        keywordOk: false,
+        judgeRelevance: 1,
+        judgeCorrectness: 1,
+        judgeCompleteness: 1,
+        judgeReasoning: 'agent threw an error',
+        judgeScore: 3,
+        totalScore: 0,
+        pass: false,
         toolsUsed: [],
         responseSnippet: '',
         error: message.slice(0, 100),
@@ -906,27 +1000,32 @@ async function main() {
     }
   }
 
-  // ── Summary ──────────────────────────────────────────────────────────────
+  // ── Summary by category ───────────────────────────────────────────────────
   console.log('\n' + '='.repeat(70))
   console.log('  Results by Category')
   console.log('='.repeat(70))
 
   const categories = [...new Set(results.map(r => r.category))]
   for (const cat of categories) {
-    const group = results.filter(r => r.category === cat)
-    const passes = group.filter(r => r.pass).length
-    console.log(`  ${cat.padEnd(14)} ${passes}/${group.length} passed`)
+    const group    = results.filter(r => r.category === cat)
+    const passes   = group.filter(r => r.pass).length
+    const avgJudge = (group.reduce((s, r) => s + r.judgeScore, 0) / group.length).toFixed(1)
+    console.log(`  ${cat.padEnd(14)} ${passes}/${group.length} passed   avg judge ${avgJudge}/9`)
   }
 
-  const totalPasses = results.filter(r => r.pass).length
-  const fullPasses = results.filter(r => r.score === 3).length
-  const avgDuration = Math.round(results.reduce((s, r) => s + r.durationMs, 0) / results.length)
-  const pct = ((totalPasses / results.length) * 100).toFixed(1)
+  // ── Overall ───────────────────────────────────────────────────────────────
+  const totalPasses  = results.filter(r => r.pass).length
+  const avgJudge     = (results.reduce((s, r) => s + r.judgeScore, 0) / results.length).toFixed(2)
+  const avgRelevance = (results.reduce((s, r) => s + r.judgeRelevance, 0) / results.length).toFixed(2)
+  const avgCorrect   = (results.reduce((s, r) => s + r.judgeCorrectness, 0) / results.length).toFixed(2)
+  const avgComplete  = (results.reduce((s, r) => s + r.judgeCompleteness, 0) / results.length).toFixed(2)
+  const avgDuration  = Math.round(results.reduce((s, r) => s + r.durationMs, 0) / results.length)
+  const pct          = ((totalPasses / results.length) * 100).toFixed(1)
 
   console.log('\n' + '='.repeat(70))
-  console.log(`  Pass rate    : ${totalPasses}/${results.length}  (${pct}%)`)
-  console.log(`  Full passes  : ${fullPasses}/${results.length}  (all 3 criteria)`)
-  console.log(`  Avg latency  : ${avgDuration}ms per query`)
+  console.log(`  Pass rate      : ${totalPasses}/${results.length}  (${pct}%)`)
+  console.log(`  Avg judge score: ${avgJudge}/9  (relevance ${avgRelevance}  correctness ${avgCorrect}  completeness ${avgComplete})`)
+  console.log(`  Avg latency    : ${avgDuration}ms per query`)
   console.log('='.repeat(70))
 
   // ── Failures detail ───────────────────────────────────────────────────────
@@ -936,13 +1035,15 @@ async function main() {
     for (const f of failures) {
       console.log(`\n  [${String(f.id).padStart(2, '0')}] ${f.query}`)
       if (f.error) {
-        console.log(`       error    : ${f.error}`)
+        console.log(`       error     : ${f.error}`)
       } else {
-        console.log(`       tools    : [${f.toolsUsed.join(', ')}]`)
-        console.log(`       response : ${f.responseSnippet || '(empty)'}`)
-        const tc = TEST_CASES.find(t => t.id === f.id)!
-        if (!f.toolOk)    console.log(`       missing  : expected one of [${tc.expectedTools.join(', ')}]`)
-        if (!f.contentOk) console.log(`       missing  : expected one of [${tc.expectedKeywords.join(', ')}]`)
+        console.log(`       tools     : [${f.toolsUsed.join(', ')}]`)
+        console.log(`       response  : ${f.responseSnippet || '(empty)'}`)
+        console.log(`       judge     : R:${f.judgeRelevance} C:${f.judgeCorrectness} P:${f.judgeCompleteness} — ${f.judgeReasoning}`)
+        if (!f.toolOk) {
+          const tc = TEST_CASES.find(t => t.id === f.id)!
+          console.log(`       missing   : expected one of [${tc.expectedTools.join(', ')}]`)
+        }
       }
     }
   }

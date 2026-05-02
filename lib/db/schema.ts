@@ -88,7 +88,7 @@ export type VectorStoreDoc = typeof vectorStore.$inferSelect
 export type NewVectorStoreDoc = typeof vectorStore.$inferInsert
 
 // Document types enum
-export type DocumentType = 'transaction' | 'category_rule' | 'query_example' | 'schema'
+export type DocumentType = 'transaction' | 'category_rule' | 'query_example' | 'schema' | 'preference'
 
 // ============================================================================
 // USER SETTINGS TABLE

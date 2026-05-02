@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { Send, Loader2, Bot, User, Code2, Table, Cpu, Wrench } from 'lucide-react'
+import { Send, Loader2, Bot, User, Code2, Table, Cpu, Wrench, ChevronDown, ChevronRight } from 'lucide-react'
 import {
   BarChart,
   Bar,
@@ -20,28 +20,63 @@ import type { ChartData } from '@/types'
 
 const CHART_COLORS = [
   '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6',
-  '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1'
+  '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1',
 ]
+
+// Human-friendly labels for tool names
+const TOOL_LABELS: Record<string, string> = {
+  sql_query: 'Running SQL query',
+  get_categories: 'Fetching categories',
+  get_financial_summary: 'Summarizing finances',
+  get_monthly_trends: 'Analyzing trends',
+  search_transactions: 'Searching transactions',
+  compare_periods: 'Comparing periods',
+  retrieve_context: 'Retrieving context',
+  find_similar_transactions: 'Finding similar transactions',
+  preview_categorization: 'Previewing categorization',
+  recategorize_transactions: 'Recategorizing',
+  learn_category: 'Learning category rule',
+  detect_anomalies: 'Detecting anomalies',
+  remember_preference: 'Saving preference',
+  recall_preferences: 'Recalling preferences',
+}
+
+interface ThinkingStep {
+  tool: string
+  input: string
+  result?: string
+  status: 'running' | 'done'
+}
 
 interface Message {
   id: string
   type: 'user' | 'assistant'
   content: string
   sql?: string
-  results?: any[]
+  results?: unknown[]
   chartData?: ChartData
   timestamp: Date
   agentMode?: boolean
   toolsUsed?: string[]
+  thinkingSteps?: ThinkingStep[]
+  // Set while the assistant message is still streaming
+  streaming?: boolean
 }
 
 function MessageChart({ chartData }: { chartData: ChartData }) {
   if (!chartData || !chartData.data || chartData.data.length === 0) return null
 
-  // Determine dataKey and nameKey from the data if not provided
   const firstItem = chartData.data[0]
-  const dataKey = chartData.dataKey || (firstItem.value !== undefined ? 'value' : Object.keys(firstItem).find(k => typeof firstItem[k] === 'number') || 'value')
-  const nameKey = chartData.nameKey || (firstItem.name !== undefined ? 'name' : Object.keys(firstItem).find(k => typeof firstItem[k] === 'string') || 'name')
+  const dataKey =
+    chartData.dataKey ||
+    (firstItem.value !== undefined
+      ? 'value'
+      : Object.keys(firstItem).find((k) => typeof firstItem[k] === 'number') || 'value')
+  const nameKey =
+    chartData.nameKey ||
+    (firstItem.name !== undefined
+      ? 'name'
+      : Object.keys(firstItem).find((k) => typeof firstItem[k] === 'string') || 'name')
 
   return (
     <div className="mt-3 bg-white rounded-lg p-4 border">
@@ -64,14 +99,22 @@ function MessageChart({ chartData }: { chartData: ChartData }) {
                 <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
               ))}
             </Pie>
-            <Tooltip formatter={(value: any) => typeof value === 'number' ? `$${value.toFixed(2)}` : value} />
+            <Tooltip
+              formatter={(value: number | string) =>
+                typeof value === 'number' ? `$${value.toFixed(2)}` : value
+              }
+            />
           </PieChart>
         ) : chartData.type === 'line' ? (
           <LineChart data={chartData.data}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey={nameKey} fontSize={12} />
             <YAxis fontSize={12} />
-            <Tooltip formatter={(value: any) => typeof value === 'number' ? `$${value.toFixed(2)}` : value} />
+            <Tooltip
+              formatter={(value: number | string) =>
+                typeof value === 'number' ? `$${value.toFixed(2)}` : value
+              }
+            />
             <Line type="monotone" dataKey={dataKey} stroke="#3b82f6" strokeWidth={2} />
             {chartData.data[0]?.income !== undefined && (
               <Line type="monotone" dataKey="income" stroke="#10b981" strokeWidth={2} />
@@ -82,7 +125,11 @@ function MessageChart({ chartData }: { chartData: ChartData }) {
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey={nameKey} fontSize={12} angle={-45} textAnchor="end" height={60} />
             <YAxis fontSize={12} />
-            <Tooltip formatter={(value: any) => typeof value === 'number' ? `$${value.toFixed(2)}` : value} />
+            <Tooltip
+              formatter={(value: number | string) =>
+                typeof value === 'number' ? `$${value.toFixed(2)}` : value
+              }
+            />
             <Bar dataKey={dataKey} fill="#3b82f6" />
           </BarChart>
         )}
@@ -91,11 +138,12 @@ function MessageChart({ chartData }: { chartData: ChartData }) {
   )
 }
 
-function ResultsTable({ results }: { results: any[] }) {
+function ResultsTable({ results }: { results: unknown[] }) {
   if (!results || results.length === 0) return null
-  
-  const columns = Object.keys(results[0])
-  const displayResults = results.slice(0, 10)
+
+  const rows = results as Record<string, unknown>[]
+  const columns = Object.keys(rows[0])
+  const displayResults = rows.slice(0, 10)
 
   return (
     <div className="mt-3 bg-white rounded-lg border overflow-hidden">
@@ -115,8 +163,8 @@ function ResultsTable({ results }: { results: any[] }) {
               <tr key={i} className="border-t hover:bg-gray-50">
                 {columns.map((col) => (
                   <td key={col} className="px-3 py-2 text-gray-800">
-                    {typeof row[col] === 'number' 
-                      ? row[col].toFixed(2) 
+                    {typeof row[col] === 'number'
+                      ? (row[col] as number).toFixed(2)
                       : String(row[col] ?? '')}
                   </td>
                 ))}
@@ -125,9 +173,72 @@ function ResultsTable({ results }: { results: any[] }) {
           </tbody>
         </table>
       </div>
-      {results.length > 10 && (
+      {rows.length > 10 && (
         <div className="px-3 py-2 bg-gray-50 text-xs text-gray-500 border-t">
-          Showing 10 of {results.length} results
+          Showing 10 of {rows.length} results
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ThinkingStepsPanel({ steps, streaming }: { steps: ThinkingStep[]; streaming: boolean }) {
+  const [expanded, setExpanded] = useState(true)
+
+  if (steps.length === 0 && !streaming) return null
+
+  return (
+    <div className="mt-2 border border-purple-100 rounded-lg overflow-hidden text-xs">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center justify-between px-3 py-2 bg-purple-50 text-purple-700 hover:bg-purple-100 transition-colors"
+      >
+        <span className="flex items-center gap-1.5 font-medium">
+          <Cpu size={11} />
+          Agent reasoning
+          {streaming && steps.length === 0 && (
+            <span className="ml-1 flex gap-0.5">
+              <span className="animate-bounce delay-0 w-1 h-1 bg-purple-400 rounded-full" />
+              <span className="animate-bounce delay-75 w-1 h-1 bg-purple-400 rounded-full" />
+              <span className="animate-bounce delay-150 w-1 h-1 bg-purple-400 rounded-full" />
+            </span>
+          )}
+        </span>
+        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+      </button>
+
+      {expanded && (
+        <div className="divide-y divide-purple-50">
+          {steps.map((step, i) => (
+            <div key={i} className="px-3 py-2 bg-white flex items-start gap-2">
+              <span className="mt-0.5 flex-shrink-0">
+                {step.status === 'running' ? (
+                  <Loader2 size={11} className="animate-spin text-purple-500" />
+                ) : (
+                  <span className="text-green-500">✓</span>
+                )}
+              </span>
+              <div className="min-w-0">
+                <span className="font-medium text-gray-700">
+                  {TOOL_LABELS[step.tool] ?? step.tool.replace(/_/g, ' ')}
+                </span>
+                {step.input && (
+                  <p className="text-gray-400 truncate mt-0.5">{step.input}</p>
+                )}
+                {step.result && step.status === 'done' && (
+                  <p className="text-gray-500 mt-0.5">{step.result}</p>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {/* Placeholder pulse row while agent is still working */}
+          {streaming && (
+            <div className="px-3 py-2 bg-white flex items-center gap-2 text-gray-400">
+              <Loader2 size={11} className="animate-spin text-purple-400" />
+              <span>Working…</span>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -139,7 +250,8 @@ export default function ChatInterface() {
     {
       id: '1',
       type: 'assistant',
-      content: "Hello! I'm your AI-powered financial assistant. I use an intelligent agent to analyze your transactions, compare spending patterns, and provide insights. Ask me anything like 'How much did I spend on coffee this month?' or 'Compare my spending to last month.'",
+      content:
+        "Hello! I'm your AI-powered financial assistant. I use an intelligent agent to analyze your transactions, compare spending patterns, and provide insights. Ask me anything like 'How much did I spend on coffee this month?' or 'Compare my spending to last month.'",
       timestamp: new Date(),
       agentMode: true,
     },
@@ -170,49 +282,132 @@ export default function ChatInterface() {
       timestamp: new Date(),
     }
 
-    setMessages((prev) => [...prev, userMessage])
+    const assistantId = (Date.now() + 1).toString()
+    const streamingMessage: Message = {
+      id: assistantId,
+      type: 'assistant',
+      content: '',
+      timestamp: new Date(),
+      agentMode: true,
+      streaming: true,
+      thinkingSteps: [],
+    }
+
+    setMessages((prev) => [...prev, userMessage, streamingMessage])
     setInput('')
     setLoading(true)
 
     try {
-      const response = await fetch('/api/query', {
+      const response = await fetch('/api/query-stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: input.trim() }),
+        body: JSON.stringify({ query: userMessage.content }),
       })
 
-      const data = await response.json()
+      if (!response.ok || !response.body) {
+        throw new Error(`HTTP ${response.status}`)
+      }
 
-      if (response.ok) {
-        const assistantMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          type: 'assistant',
-          content: data.response,
-          sql: data.sql,
-          results: data.results,
-          chartData: data.chartData,
-          timestamp: new Date(),
-          agentMode: data.agentMode,
-          toolsUsed: data.toolsUsed,
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+
+        const lines = buffer.split('\n\n')
+        buffer = lines.pop() ?? ''
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const raw = line.slice(6).trim()
+          if (!raw) continue
+
+          let step: Record<string, unknown>
+          try {
+            step = JSON.parse(raw)
+          } catch {
+            continue
+          }
+
+          if (step.type === 'tool_start') {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId
+                  ? {
+                      ...m,
+                      thinkingSteps: [
+                        ...(m.thinkingSteps ?? []),
+                        {
+                          tool: step.tool as string,
+                          input: step.input as string,
+                          status: 'running' as const,
+                        },
+                      ],
+                    }
+                  : m,
+              ),
+            )
+          } else if (step.type === 'tool_end') {
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== assistantId) return m
+                const steps = [...(m.thinkingSteps ?? [])]
+                // Mark last matching running step as done
+                for (let i = steps.length - 1; i >= 0; i--) {
+                  if (steps[i].tool === step.tool && steps[i].status === 'running') {
+                    steps[i] = { ...steps[i], result: step.result as string, status: 'done' }
+                    break
+                  }
+                }
+                return { ...m, thinkingSteps: steps }
+              }),
+            )
+          } else if (step.type === 'done') {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId
+                  ? {
+                      ...m,
+                      content: step.response as string,
+                      sql: step.executedSQL as string | undefined,
+                      results: step.queryResults as unknown[],
+                      chartData: step.chartData as ChartData | undefined,
+                      toolsUsed: step.toolsUsed as string[],
+                      streaming: false,
+                    }
+                  : m,
+              ),
+            )
+          } else if (step.type === 'error') {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId
+                  ? {
+                      ...m,
+                      content: `Sorry, I encountered an error: ${step.error}`,
+                      streaming: false,
+                    }
+                  : m,
+              ),
+            )
+          }
         }
-        setMessages((prev) => [...prev, assistantMessage])
-      } else {
-        const errorMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          type: 'assistant',
-          content: `Sorry, I encountered an error: ${data.error || 'Unknown error'}. ${data.message || ''}`,
-          timestamp: new Date(),
-        }
-        setMessages((prev) => [...prev, errorMessage])
       }
     } catch (error) {
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        type: 'assistant',
-        content: 'Sorry, I had trouble connecting to the server. Please try again.',
-        timestamp: new Date(),
-      }
-      setMessages((prev) => [...prev, errorMessage])
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantId
+            ? {
+                ...m,
+                content: 'Sorry, I had trouble connecting to the server. Please try again.',
+                streaming: false,
+              }
+            : m,
+        ),
+      )
     } finally {
       setLoading(false)
     }
@@ -249,77 +444,122 @@ export default function ChatInterface() {
                     : 'bg-gray-200 text-gray-700'
                 }`}
               >
-                {message.type === 'user' ? <User size={18} /> : message.agentMode ? <Cpu size={18} /> : <Bot size={18} />}
+                {message.type === 'user' ? (
+                  <User size={18} />
+                ) : message.agentMode ? (
+                  <Cpu size={18} />
+                ) : (
+                  <Bot size={18} />
+                )}
               </div>
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 {/* Agent Mode Indicator */}
-                {message.type === 'assistant' && message.agentMode && message.toolsUsed && message.toolsUsed.length > 0 && (
-                  <div className="mb-1 flex items-center gap-1 text-xs text-purple-600">
-                    <Cpu size={10} />
-                    <span>Agent used {message.toolsUsed.length} tool{message.toolsUsed.length > 1 ? 's' : ''}</span>
+                {message.type === 'assistant' &&
+                  message.agentMode &&
+                  message.toolsUsed &&
+                  message.toolsUsed.length > 0 &&
+                  !message.streaming && (
+                    <div className="mb-1 flex items-center gap-1 text-xs text-purple-600">
+                      <Cpu size={10} />
+                      <span>
+                        Agent used {message.toolsUsed.length} tool
+                        {message.toolsUsed.length > 1 ? 's' : ''}
+                      </span>
+                    </div>
+                  )}
+
+                {/* Live thinking steps (shown while streaming or after) */}
+                {message.type === 'assistant' && message.agentMode && (
+                  <ThinkingStepsPanel
+                    steps={message.thinkingSteps ?? []}
+                    streaming={!!message.streaming}
+                  />
+                )}
+
+                {/* Message bubble — only show once we have content */}
+                {(message.content || !message.streaming) && (
+                  <div
+                    className={`rounded-lg p-4 mt-2 ${
+                      message.type === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-800'
+                    }`}
+                  >
+                    {message.streaming && !message.content ? (
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="animate-spin text-purple-500" size={16} />
+                        <span className="text-sm text-gray-500">Preparing answer…</span>
+                      </div>
+                    ) : (
+                      <p className="whitespace-pre-wrap">{message.content}</p>
+                    )}
                   </div>
                 )}
-                
-                <div
-                  className={`rounded-lg p-4 ${
-                    message.type === 'user'
-                      ? 'bg-blue-500 text-white'
-                      : 'bg-gray-100 text-gray-800'
-                  }`}
-                >
-                  <p className="whitespace-pre-wrap">{message.content}</p>
-                </div>
 
                 {/* Chart Visualization */}
                 {message.chartData && <MessageChart chartData={message.chartData} />}
-                
+
                 {/* SQL, Table, and Tools Controls */}
-                {message.type === 'assistant' && (message.sql || (message.results && message.results.length > 0) || (message.toolsUsed && message.toolsUsed.length > 0)) && (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {message.toolsUsed && message.toolsUsed.length > 0 && (
-                      <button
-                        onClick={() => setShowTools(showTools === message.id ? null : message.id)}
-                        className="text-xs text-purple-600 hover:text-purple-700 flex items-center gap-1 px-2 py-1 bg-purple-50 rounded"
-                      >
-                        <Wrench size={12} />
-                        {showTools === message.id ? 'Hide' : 'Show'} Tools
-                      </button>
-                    )}
-                    {message.sql && (
-                      <button
-                        onClick={() => setShowSQL(showSQL === message.id ? null : message.id)}
-                        className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1 px-2 py-1 bg-blue-50 rounded"
-                      >
-                        <Code2 size={12} />
-                        {showSQL === message.id ? 'Hide' : 'Show'} SQL
-                      </button>
-                    )}
-                    {message.results && message.results.length > 0 && (
-                      <button
-                        onClick={() => setShowTable(showTable === message.id ? null : message.id)}
-                        className="text-xs text-green-600 hover:text-green-700 flex items-center gap-1 px-2 py-1 bg-green-50 rounded"
-                      >
-                        <Table size={12} />
-                        {showTable === message.id ? 'Hide' : 'Show'} Data ({message.results.length} rows)
-                      </button>
-                    )}
-                  </div>
-                )}
+                {message.type === 'assistant' &&
+                  !message.streaming &&
+                  (message.sql ||
+                    (message.results && message.results.length > 0) ||
+                    (message.toolsUsed && message.toolsUsed.length > 0)) && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {message.toolsUsed && message.toolsUsed.length > 0 && (
+                        <button
+                          onClick={() =>
+                            setShowTools(showTools === message.id ? null : message.id)
+                          }
+                          className="text-xs text-purple-600 hover:text-purple-700 flex items-center gap-1 px-2 py-1 bg-purple-50 rounded"
+                        >
+                          <Wrench size={12} />
+                          {showTools === message.id ? 'Hide' : 'Show'} Tools
+                        </button>
+                      )}
+                      {message.sql && (
+                        <button
+                          onClick={() => setShowSQL(showSQL === message.id ? null : message.id)}
+                          className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1 px-2 py-1 bg-blue-50 rounded"
+                        >
+                          <Code2 size={12} />
+                          {showSQL === message.id ? 'Hide' : 'Show'} SQL
+                        </button>
+                      )}
+                      {message.results && message.results.length > 0 && (
+                        <button
+                          onClick={() =>
+                            setShowTable(showTable === message.id ? null : message.id)
+                          }
+                          className="text-xs text-green-600 hover:text-green-700 flex items-center gap-1 px-2 py-1 bg-green-50 rounded"
+                        >
+                          <Table size={12} />
+                          {showTable === message.id ? 'Hide' : 'Show'} Data (
+                          {message.results.length} rows)
+                        </button>
+                      )}
+                    </div>
+                  )}
 
                 {/* Tools Used Display */}
-                {showTools === message.id && message.toolsUsed && message.toolsUsed.length > 0 && (
-                  <div className="mt-2 bg-purple-50 border border-purple-200 p-3 rounded text-sm">
-                    <div className="text-purple-700 font-medium text-xs mb-1">🔧 Agent Tools Used:</div>
-                    <div className="flex flex-wrap gap-1">
-                      {message.toolsUsed.map((tool, i) => (
-                        <span key={i} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
-                          {tool.replace(/_/g, ' ')}
-                        </span>
-                      ))}
+                {showTools === message.id &&
+                  message.toolsUsed &&
+                  message.toolsUsed.length > 0 && (
+                    <div className="mt-2 bg-purple-50 border border-purple-200 p-3 rounded text-sm">
+                      <div className="text-purple-700 font-medium text-xs mb-1">
+                        Agent Tools Used:
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {message.toolsUsed.map((tool, i) => (
+                          <span
+                            key={i}
+                            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800"
+                          >
+                            {tool.replace(/_/g, ' ')}
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
-                
+                  )}
+
                 {/* SQL Query Display */}
                 {showSQL === message.id && message.sql && (
                   <div className="mt-2 bg-gray-900 text-green-400 p-3 rounded text-sm font-mono overflow-x-auto">
@@ -335,23 +575,7 @@ export default function ChatInterface() {
             </div>
           </div>
         ))}
-        
-        {loading && (
-          <div className="flex justify-start">
-            <div className="flex items-start gap-3">
-              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-purple-500 text-white flex items-center justify-center">
-                <Cpu size={18} />
-              </div>
-              <div className="bg-gray-100 rounded-lg p-4">
-                <div className="flex items-center gap-2">
-                  <Loader2 className="animate-spin text-purple-600" size={20} />
-                  <span className="text-sm text-gray-600">Agent thinking...</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-        
+
         <div ref={messagesEndRef} />
       </div>
 

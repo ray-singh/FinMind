@@ -94,6 +94,9 @@ TOOL SELECTION STRATEGY:
 - For "recategorize" or "fix categories" → use recategorize_transactions
 - For "what category is..." → use preview_categorization
 - For finding similar transactions → use find_similar_transactions (uses pgvector)
+- For "unusual", "unexpected", "spike", "anomaly", "weird charges" → use detect_anomalies
+- For "remember", "save this", "note that" user preferences → use remember_preference
+- At the start of queries that reference past context → use recall_preferences first
 
 CATEGORIZATION SYSTEM:
 The system uses a smart multi-tier categorization approach:
@@ -313,16 +316,16 @@ export async function runFinanceAgent(userQuery: string, userId: string, openaiA
 
   try {
     const graph = createFinanceAgentGraph(userId, openaiApiKey);
-    
+
     const initialState = {
       messages: [new HumanMessage(userQuery)],
     };
-    
+
     const result = await graph.invoke(initialState);
-    
+
     console.log('[Agent] Success! Tools used:', result.toolsUsed)
     console.log('[Agent] Response length:', result.finalResponse?.length || 0)
-    
+
     return {
       response: result.finalResponse || "I apologize, but I couldn't process your request. Please try again.",
       chartData: result.chartData,
@@ -334,6 +337,107 @@ export async function runFinanceAgent(userQuery: string, userId: string, openaiA
     console.error('[Agent] Error:', error)
     console.error('[Agent] Error stack:', error instanceof Error ? error.stack : 'No stack')
     throw error
+  }
+}
+
+export type AgentStep =
+  | { type: 'thinking'; content: string }
+  | { type: 'tool_start'; tool: string; input: string }
+  | { type: 'tool_end'; tool: string; result: string }
+  | { type: 'done'; response: string; chartData: AgentStateType["chartData"]; executedSQL: string; queryResults: unknown[]; toolsUsed: string[] }
+  | { type: 'error'; error: string };
+
+/**
+ * Streaming version of the finance agent — yields step events as the agent
+ * reasons, calls tools, and produces its final answer. Callers can use this
+ * to display live "thinking" UI without waiting for the full response.
+ */
+export async function* runFinanceAgentStream(
+  userQuery: string,
+  userId: string,
+  openaiApiKey?: string,
+): AsyncGenerator<AgentStep> {
+  const graph = createFinanceAgentGraph(userId, openaiApiKey);
+  const initialState = { messages: [new HumanMessage(userQuery)] };
+
+  try {
+    // LangGraph's streamEvents emits fine-grained events for each node/tool
+    const eventStream = graph.streamEvents(initialState, { version: "v2" });
+
+    for await (const event of eventStream) {
+      const { event: evtName, name, data } = event as {
+        event: string;
+        name: string;
+        data: Record<string, unknown>;
+      };
+
+      // Agent is reasoning (LLM streaming chunk)
+      if (evtName === "on_chat_model_stream") {
+        const chunk = data?.chunk as { content?: string | Array<{ type: string; text?: string }> } | undefined;
+        let text = "";
+        if (typeof chunk?.content === "string") {
+          text = chunk.content;
+        } else if (Array.isArray(chunk?.content)) {
+          text = chunk.content
+            .filter((c) => c.type === "text")
+            .map((c) => c.text ?? "")
+            .join("");
+        }
+        if (text) {
+          yield { type: "thinking", content: text };
+        }
+      }
+
+      // A tool is about to be called
+      if (evtName === "on_tool_start") {
+        const input = data?.input as Record<string, unknown> | undefined;
+        yield {
+          type: "tool_start",
+          tool: name,
+          input: input ? JSON.stringify(input).slice(0, 200) : "",
+        };
+      }
+
+      // A tool finished
+      if (evtName === "on_tool_end") {
+        const output = data?.output as string | undefined;
+        let preview = "";
+        if (output) {
+          try {
+            const parsed = JSON.parse(output) as Record<string, unknown>;
+            // Surface the most useful snippet without dumping the full payload
+            if (typeof parsed.error === "string") {
+              preview = `Error: ${parsed.error}`;
+            } else if (typeof parsed.rowCount === "number") {
+              preview = `${parsed.rowCount} rows returned`;
+            } else if (typeof parsed.count === "number") {
+              preview = `${parsed.count} items`;
+            } else {
+              preview = output.slice(0, 120);
+            }
+          } catch {
+            preview = output.slice(0, 120);
+          }
+        }
+        yield { type: "tool_end", tool: name, result: preview };
+      }
+    }
+
+    // After streaming completes, do a final invoke to get the structured result
+    const result = await graph.invoke(initialState);
+    yield {
+      type: "done",
+      response: result.finalResponse || "I apologize, but I couldn't process your request. Please try again.",
+      chartData: result.chartData,
+      executedSQL: result.executedSQL,
+      queryResults: result.queryResults,
+      toolsUsed: result.toolsUsed,
+    };
+  } catch (error) {
+    yield {
+      type: "error",
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
